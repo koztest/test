@@ -1,0 +1,5 @@
+.version {float: right;}
+.version::before {
+    content: "v";
+}
+.console {font-family: Lucida Console;}
