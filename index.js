@@ -1,5 +1,5 @@
 require('dotenv').config()
-const {Client, WebhookClient, RichEmbed, Events, GatewayIntentBits} = require("discord.js");
+const {Client, WebhookClient, EmbedBuilder, Events, GatewayIntentBits} = require("discord.js");
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const hqSocket = require('./lib/socket');
 const { v4: uuidv4 } = require('uuid');
@@ -16,6 +16,8 @@ const app = express()
 const server = require('http').createServer();
 const passport = require('passport');
 var DiscordStrategy = require('passport-discord').Strategy;
+var gwebhook;
+var socket_url;
  
 passport.use(new DiscordStrategy({
     clientID: process.env.DISCORD_CLIENT_ID,
@@ -106,11 +108,27 @@ app.get('/login', (req, res) => {
 })
 
 app.get('/member/checkHQ', (req, res) => {
-  res.json({
-    active: true,
-    socketUrl: process.env.WEB_URL.replace(/^http/, 'ws') + "/hq"
-  });
-  return;
+  fetch(process.env.CHECK_URL)
+    .then(res => res.json())
+    .then(json => {
+      if (json.broadcast && json.broadcast.socketUrl) {
+        socket_url = json.broadcast.socketUrl;
+        console.log("Fonund socket url");
+        res.json({
+          active: true,
+          socketUrl: process.env.WEB_URL.replace(/^http/, 'ws') + "/hq"
+        });
+
+        return;
+      } else {
+        socket_url = null;
+        res.json({
+          active: false
+        });
+        
+        return;
+      }
+    });
 });
 
 app.get('/member/testBroadcast', (req, res) => {
@@ -164,7 +182,8 @@ server.on('upgrade', function upgrade(request, socket, head) {
     return;
   }
   if (socketToUse.socket == undefined) {
-    socketToUse.listen(process.env.SOCKET_URL);
+    socketToUse.setHook(gwebhook);
+    socketToUse.listen(socket_url);
   }
   socketToUse.socket.clients.forEach(function each(ws) {
     if (ws.sid === sid) {
@@ -182,3 +201,20 @@ server.on('request', app);
 setInterval(function(){hqSocket.ping();}, 3000);
 
 server.listen(PORT, () => console.log(`Listening on ${ PORT }`))
+
+client.once(Events.ClientReady, async () => {
+  const channel = client.channels.cache.get(process.env.CHANNEL_ID);
+  try {
+    const webhooks = await channel.fetchWebhooks();
+    const webhook = webhooks.find(wh => wh.token);
+
+    if (!webhook) {
+      return console.log('No webhook was found that I can use!');
+    }
+
+    gwebhook = webhook;
+
+  } catch (error) {
+    console.error('Error trying to send a message: ', error);
+  }
+});
